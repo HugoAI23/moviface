@@ -1,0 +1,25 @@
+# Datos biométricos (constitution.md, principio 5) — nunca se suben al repo
+static/img/enrolled_faces/*
+!static/img/enrolled_faces/.gitkeep
+
+# Entornos y dependencias Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+env/
+
+# Variables de entorno / credenciales (p. ej. conexión a PostgreSQL)
+.env
+*.env
+
+# Editores / IDEs
+.vscode/
+.idea/
+.claude/settings.local.json
+
+# Sistema operativo
+.DS_Store
+
+# Logs
+*.log
