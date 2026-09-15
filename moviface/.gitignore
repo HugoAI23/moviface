@@ -8,6 +8,7 @@ __pycache__/
 .venv/
 venv/
 env/
+.mv/
 
 # Variables de entorno / credenciales (p. ej. conexión a PostgreSQL)
 .env
