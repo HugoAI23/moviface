@@ -1,3 +1,6 @@
 deepface
 opencv-python
 pytest
+psycopg[binary]
+bcrypt
+python-dotenv
