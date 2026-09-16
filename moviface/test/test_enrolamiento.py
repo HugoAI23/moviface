@@ -82,6 +82,68 @@ def test_rf5_a_rf7_reintenta_sin_limite_ante_captura_invalida(monkeypatch):
     assert almacen_rostros.existe_enrolamiento("cuenta_prueba")
 
 
+def test_cancelar_la_captura_no_se_reintenta():
+    intentos = {"n": 0}
+
+    def _capturar_cancelada(ruta_destino):
+        intentos["n"] += 1
+        raise lector_de_caras.CapturaCancelada("Captura cancelada.")
+
+    with pytest.raises(lector_de_caras.CapturaCancelada):
+        enrolamiento.enrolar(
+            capturar_foto=_capturar_cancelada,
+            confirmar_vista_previa=_confirmar_siempre,
+            **_sesion_activa(),
+        )
+
+    assert intentos["n"] == 1
+    assert not almacen_rostros.existe_enrolamiento("cuenta_prueba")
+
+
+def test_fallo_de_camara_no_se_reintenta():
+    """Caso límite de spec.md: un fallo de cámara se informa y corta el
+    flujo, sin dejar un enrolamiento a medias ni reintentar sin fin.
+    """
+    intentos = {"n": 0}
+
+    def _capturar_falla(ruta_destino):
+        intentos["n"] += 1
+        raise lector_de_caras.ErrorDeCamara("No se pudo acceder a la cámara.")
+
+    with pytest.raises(lector_de_caras.ErrorDeCamara):
+        enrolamiento.enrolar(
+            capturar_foto=_capturar_falla,
+            confirmar_vista_previa=_confirmar_siempre,
+            **_sesion_activa(),
+        )
+
+    assert intentos["n"] == 1
+    assert not almacen_rostros.existe_enrolamiento("cuenta_prueba")
+
+
+def test_error_tecnico_de_deteccion_no_se_reintenta(monkeypatch):
+    """Un fallo de entorno/configuración de DeepFace no debe disfrazarse
+    de captura inválida ni provocar reintentos sin fin.
+    """
+    intentos = {"n": 0}
+
+    def _validar_rostro(ruta):
+        intentos["n"] += 1
+        raise lector_de_caras.ErrorDeDeteccion("faltan los archivos haarcascade")
+
+    monkeypatch.setattr(lector_de_caras, "validar_rostro", _validar_rostro)
+
+    with pytest.raises(lector_de_caras.ErrorDeDeteccion):
+        enrolamiento.enrolar(
+            capturar_foto=_capturar_foto_falsa,
+            confirmar_vista_previa=_confirmar_siempre,
+            **_sesion_activa(),
+        )
+
+    assert intentos["n"] == 1
+    assert not almacen_rostros.existe_enrolamiento("cuenta_prueba")
+
+
 def test_rf6_rechaza_varios_rostros_y_permite_reintentar(monkeypatch):
     intentos = {"n": 0}
 

@@ -10,6 +10,7 @@ import pytest
 
 import almacen_rostros
 import enrolamiento
+import identificacion
 import lector_de_caras
 
 RAIZ_PROYECTO = Path(__file__).resolve().parent.parent
@@ -19,6 +20,7 @@ MODULOS_ENROLAMIENTO = [
     "lector_de_caras.py",
     "almacen_rostros.py",
     "enrolamiento.py",
+    "identificacion.py",
     "master.py",
 ]
 
@@ -85,6 +87,55 @@ def test_ningun_dato_biometrico_se_notifica_por_consola(monkeypatch, capsys):
     for componente in vector_secreto:
         assert str(componente) not in salida
     assert contenido_foto.decode("latin-1") not in salida
+
+
+def test_ningun_vector_se_expone_durante_la_identificacion(monkeypatch, capsys):
+    """Spec 003: ni el vector capturado ni el de ninguna cuenta enrolada
+    pueden aparecer en notificaciones o salidas de consola durante la
+    comparación (NFR de confidencialidad acotada).
+    """
+    vector_enrolado = [0.111111, 0.222222, 0.333333]
+    vector_capturado = [0.444444, 0.555555, 0.666666]
+
+    ruta_foto = almacen_rostros.RUTA_BASE.parent / "foto_origen.jpg"
+    ruta_foto.parent.mkdir(parents=True, exist_ok=True)
+    ruta_foto.write_bytes(b"foto de prueba")
+    almacen_rostros.guardar_enrolamiento("cuenta_prueba", ruta_foto, vector_enrolado)
+
+    monkeypatch.setattr(lector_de_caras, "validar_rostro", lambda ruta: None)
+    monkeypatch.setattr(lector_de_caras, "generar_vector", lambda ruta: vector_capturado)
+    monkeypatch.setattr(lector_de_caras, "calcular_distancia", lambda a, b: 0.10)
+    monkeypatch.setattr(lector_de_caras, "es_coincidencia", lambda distancia: True)
+
+    # La ventana de resultado también es una salida hacia quien mira la
+    # pantalla: su texto se revisa igual que la consola.
+    textos_en_ventana = []
+    monkeypatch.setattr(
+        lector_de_caras,
+        "mostrar_resultado",
+        lambda ruta, mensaje, *, identificado: textos_en_ventana.append(mensaje),
+    )
+
+    mensajes_capturados = []
+    identificado = identificacion.identificar(
+        capturar_foto=lambda ruta: ruta.write_bytes(b"BYTES-DE-FOTO-SECRETA"),
+        notificar=mensajes_capturados.append,
+    )
+
+    assert identificado == "cuenta_prueba"
+    assert textos_en_ventana
+
+    salida = (
+        "\n".join(mensajes_capturados)
+        + "\n".join(textos_en_ventana)
+        + capsys.readouterr().out
+    )
+
+    for vector in (vector_enrolado, vector_capturado):
+        assert str(vector) not in salida
+        for componente in vector:
+            assert str(componente) not in salida
+    assert "BYTES-DE-FOTO-SECRETA" not in salida
 
 
 def test_modulos_de_enrolamiento_no_importan_librerias_de_red():

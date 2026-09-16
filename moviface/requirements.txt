@@ -1,5 +1,12 @@
 deepface
-opencv-python
+# DeepFace y retina-face usan la API de Keras 2; TensorFlow >= 2.16 trae
+# Keras 3, así que tf-keras es obligatorio para que DeepFace importe.
+# Debe empatar con la versión de TensorFlow instalada.
+tf-keras
+# opencv-python 5.x ya no incluye los archivos haarcascade en cv2/data/,
+# que es lo que usa el detector por defecto de DeepFace. Sin ellos, toda
+# captura se rechaza. Debe quedarse en la serie 4.x.
+opencv-python<5
 pytest
 psycopg[binary]
 bcrypt

@@ -1,9 +1,9 @@
 """Punto de entrada único de moviface (docs/constitution.md, principio 8).
 
 Los módulos de apoyo (sesion.py, cuentas.py, basedatos.py,
-lector_de_caras.py, almacen_rostros.py, enrolamiento.py) nunca se
-ejecutan directamente: toda interacción con el usuario pasa por este
-archivo.
+lector_de_caras.py, almacen_rostros.py, enrolamiento.py,
+identificacion.py) nunca se ejecutan directamente: toda interacción con
+el usuario pasa por este archivo.
 """
 
 from getpass import getpass
@@ -12,6 +12,8 @@ from pathlib import Path
 import basedatos
 import cuentas
 import enrolamiento
+import identificacion
+import lector_de_caras
 import sesion
 
 _conexion_bd = None
@@ -81,6 +83,9 @@ def _enrolar_rostro() -> None:
         enrolamiento.SesionNoIniciada,
         enrolamiento.RostroYaEnrolado,
         enrolamiento.SesionCerrada,
+        lector_de_caras.CapturaCancelada,
+        lector_de_caras.ErrorDeCamara,
+        lector_de_caras.ErrorDeDeteccion,
     ) as error:
         print(str(error))
 
@@ -92,6 +97,22 @@ def _borrar_rostro() -> None:
         print(str(error))
 
 
+def _identificar_rostro() -> None:
+    """Spec 003: cada llamada es un intento completo de identificación.
+
+    Si nadie coincide (RF-5), identificar() informa y termina; reintentar
+    es volver a elegir esta opción del menú, no un ciclo automático.
+    """
+    try:
+        identificacion.identificar()
+    except (
+        lector_de_caras.CapturaCancelada,
+        lector_de_caras.ErrorDeCamara,
+        lector_de_caras.ErrorDeDeteccion,
+    ) as error:
+        print(str(error))
+
+
 def _menu() -> None:
     opciones = {
         "1": ("Crear cuenta", _crear_cuenta),
@@ -99,14 +120,15 @@ def _menu() -> None:
         "3": ("Cerrar sesión", _cerrar_sesion),
         "4": ("Enrolar rostro", _enrolar_rostro),
         "5": ("Borrar rostro", _borrar_rostro),
-        "6": ("Salir", None),
+        "6": ("Identificar rostro", _identificar_rostro),
+        "7": ("Salir", None),
     }
     while True:
         print("\n--- moviface ---")
         for clave, (etiqueta, _) in opciones.items():
             print(f"{clave}. {etiqueta}")
         eleccion = input("Elige una opción: ").strip()
-        if eleccion == "6":
+        if eleccion == "7":
             break
         accion = opciones.get(eleccion)
         if accion is None:
