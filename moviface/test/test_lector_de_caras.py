@@ -193,3 +193,131 @@ def test_camara_que_deja_de_entregar_imagen_cierra_la_ventana(monkeypatch, tmp_p
     assert registro["guardado"] is None
     assert camara.liberada
     assert registro["ventanas_destruidas"] == 1
+
+
+# --- Spec 004: ventana de resultado del cobro, sin foto (RF-27, plan.md D7) ---
+
+
+def _cv2_sin_lectura_de_imagenes():
+    cv2, registro = _cv2_falso(_CamaraFalsa([]), [])
+
+    def _imread_prohibido(_ruta):
+        raise AssertionError("mostrar_mensaje() no debe leer ninguna imagen del disco")
+
+    cv2.imread = _imread_prohibido
+    cv2.VideoCapture = lambda _indice: (_ for _ in ()).throw(
+        AssertionError("mostrar_mensaje() no debe abrir la cámara")
+    )
+    return cv2, registro
+
+
+def test_spec004_mensaje_de_cobro_exitoso_en_verde_sin_foto(monkeypatch):
+    cv2, registro = _cv2_sin_lectura_de_imagenes()
+    monkeypatch.setitem(sys.modules, "cv2", cv2)
+
+    lector_de_caras.mostrar_mensaje("Cobro realizado: metrobús, $6.", exito=True)
+
+    assert registro["colores_franja"] == [lector_de_caras._COLOR_IDENTIFICADO]
+    # Las fuentes de OpenCV solo dibujan ASCII: "metrobús" -> "metrobus".
+    assert registro["textos"] == ["Cobro realizado: metrobus, $6."]
+    assert registro["esperas"][0] == lector_de_caras._MILISEGUNDOS_RESULTADO
+    assert registro["ventanas_creadas"] == 1
+    assert registro["ventanas_destruidas"] == 1
+    # Lo mostrado es un lienzo generado, no una foto: nada más que el color de fondo.
+    assert registro["mostrado"] is not None
+
+
+def test_spec004_mensaje_de_cobro_rechazado_en_rojo(monkeypatch):
+    cv2, registro = _cv2_sin_lectura_de_imagenes()
+    monkeypatch.setitem(sys.modules, "cv2", cv2)
+
+    lector_de_caras.mostrar_mensaje("Cobro rechazado: saldo insuficiente (bici, $10).", exito=False)
+
+    assert registro["colores_franja"] == [lector_de_caras._COLOR_NO_IDENTIFICADO]
+
+
+def test_spec004_mensaje_de_cobro_se_cierra_aunque_falle_la_ventana(monkeypatch):
+    cv2, registro = _cv2_sin_lectura_de_imagenes()
+
+    def _imshow_falla(*_args):
+        raise RuntimeError("fallo simulado de la ventana")
+
+    cv2.imshow = _imshow_falla
+    monkeypatch.setitem(sys.modules, "cv2", cv2)
+
+    with pytest.raises(RuntimeError):
+        lector_de_caras.mostrar_mensaje("x", exito=True)
+
+    assert registro["ventanas_destruidas"] == 1
+
+
+# --- DeepFace no se puede importar por un problema del entorno ---
+# Reproduce el error real visto en la demo: TensorFlow 2.21 sin tf-keras hace
+# que la importación de DeepFace lance ValueError y cerraba master.py.
+
+import builtins
+from pathlib import Path
+
+import cobro
+import enrolamiento
+import identificacion
+import master
+
+_IMPORT_ORIGINAL = builtins.__import__
+
+
+def _import_sin_deepface(error):
+    def _importar(nombre, *args, **kwargs):
+        if nombre == "deepface" or nombre.startswith("deepface."):
+            raise error
+        return _IMPORT_ORIGINAL(nombre, *args, **kwargs)
+
+    return _importar
+
+
+_ERRORES_DE_ENTORNO = [
+    ModuleNotFoundError("No module named 'tf_keras'"),
+    ValueError("You have tensorflow 2.21.0 and this requires tf-keras package."),
+]
+
+
+@pytest.mark.parametrize("error", _ERRORES_DE_ENTORNO, ids=["sin_modulo", "valueerror_tf_keras"])
+@pytest.mark.parametrize(
+    "llamar",
+    [
+        lambda: lector_de_caras.validar_rostro(Path("captura.jpg")),
+        lambda: lector_de_caras.generar_vector(Path("captura.jpg")),
+        lambda: lector_de_caras.calcular_distancia([0.1], [0.2]),
+        lambda: lector_de_caras.es_coincidencia(0.1),
+    ],
+    ids=["validar_rostro", "generar_vector", "calcular_distancia", "es_coincidencia"],
+)
+def test_falla_al_importar_deepface_se_convierte_en_error_de_deteccion(monkeypatch, error, llamar):
+    monkeypatch.setattr(builtins, "__import__", _import_sin_deepface(error))
+
+    with pytest.raises(lector_de_caras.ErrorDeDeteccion) as capturado:
+        llamar()
+
+    assert "tf-keras" in str(capturado.value)
+    assert capturado.value.__cause__ is error
+
+
+@pytest.mark.parametrize(
+    "opcion_menu, modulo, funcion",
+    [
+        ("_enrolar_rostro", enrolamiento, "enrolar"),
+        ("_identificar_rostro", identificacion, "identificar"),
+        ("_cobrar_pasajero", cobro, "cobrar"),
+    ],
+)
+def test_master_informa_la_falla_de_deepface_sin_cerrarse(monkeypatch, capsys, opcion_menu, modulo, funcion):
+    monkeypatch.setattr(builtins, "__import__", _import_sin_deepface(_ERRORES_DE_ENTORNO[1]))
+    monkeypatch.setattr(master, "_obtener_conexion_bd", lambda: None)
+    # El flujo llega hasta validar_rostro, que es donde falló en la demo.
+    monkeypatch.setattr(
+        modulo, funcion, lambda *args, **kwargs: lector_de_caras.validar_rostro(Path("captura.jpg"))
+    )
+
+    getattr(master, opcion_menu)()  # no debe lanzar ninguna excepción
+
+    assert "No se pudo cargar DeepFace" in capsys.readouterr().out

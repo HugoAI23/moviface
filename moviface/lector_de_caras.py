@@ -214,6 +214,70 @@ def mostrar_resultado(ruta_imagen: Path, mensaje: str, *, identificado: bool) ->
             cv2.waitKey(1)
 
 
+def mostrar_mensaje(mensaje: str, *, exito: bool) -> None:
+    """Spec 004, RF-27: ventana de resultado del cobro, en verde si se cobró
+    y en rojo si no.
+
+    A diferencia de mostrar_resultado(), no carga ninguna foto (plan.md,
+    D7): mostrar el rostro del pasajero lo identificaría visualmente
+    aunque el mensaje no diga su cuenta. Se dibuja sobre un lienzo vacío
+    con la misma mecánica de cierre (sola a los pocos segundos o al
+    pulsar cualquier tecla).
+    """
+    import cv2
+    import numpy as np
+
+    ancho, alto = 1280, 360
+    lienzo = np.zeros((alto, ancho, 3), dtype=np.uint8)
+    color = _COLOR_IDENTIFICADO if exito else _COLOR_NO_IDENTIFICADO
+
+    cv2.rectangle(lienzo, (0, 0), (ancho, alto), color, cv2.FILLED)
+    cv2.putText(
+        lienzo,
+        _texto_para_ventana(mensaje),
+        (40, alto // 2 + 15),
+        cv2.FONT_HERSHEY_SIMPLEX,
+        1.0,
+        (255, 255, 255),
+        2,
+        cv2.LINE_AA,
+    )
+
+    cv2.namedWindow(_VENTANA_RESULTADO, cv2.WINDOW_NORMAL)
+    cv2.resizeWindow(_VENTANA_RESULTADO, ancho, alto)
+    cv2.setWindowProperty(_VENTANA_RESULTADO, cv2.WND_PROP_TOPMOST, 1)
+    try:
+        cv2.imshow(_VENTANA_RESULTADO, lienzo)
+        # waitKey(n) espera hasta n milisegundos o hasta que se pulse una tecla.
+        cv2.waitKey(_MILISEGUNDOS_RESULTADO)
+    finally:
+        cv2.destroyWindow(_VENTANA_RESULTADO)
+        for _ in range(5):
+            cv2.waitKey(1)
+
+
+def _importar_deepface():
+    """Carga DeepFace y convierte cualquier falla del entorno en ErrorDeDeteccion.
+
+    Importar DeepFace también importa TensorFlow y sus detectores; si falta
+    una dependencia (p. ej. tf-keras con TensorFlow >= 2.16, que lanza
+    ValueError, no ImportError) la importación misma falla. Antes esa falla
+    ocurría fuera de cualquier try y cerraba master.py por completo; así se
+    informa y se vuelve al menú, sin reintentar (ninguna foto nueva la arregla).
+    """
+    try:
+        from deepface import DeepFace
+        from deepface.modules import verification
+        from deepface.modules.exceptions import FaceNotDetected
+    except Exception as error:
+        raise ErrorDeDeteccion(
+            "No se pudo cargar DeepFace por un problema del entorno de Python, "
+            "no de la foto. Instala las dependencias de requirements.txt "
+            f"(por ejemplo tf-keras). Detalle: {error}"
+        ) from error
+    return DeepFace, verification, FaceNotDetected
+
+
 def validar_rostro(ruta_imagen: Path) -> None:
     """RF-4/RF-5/RF-6/RF-7: valida que la imagen tenga exactamente un
     rostro detectable con calidad suficiente.
@@ -228,8 +292,7 @@ def validar_rostro(ruta_imagen: Path) -> None:
     disfrazaría de "foto inválida" errores técnicos ajenos a la captura
     (ver ErrorDeDeteccion).
     """
-    from deepface import DeepFace
-    from deepface.modules.exceptions import FaceNotDetected
+    DeepFace, _, FaceNotDetected = _importar_deepface()
 
     try:
         rostros_detectados = DeepFace.extract_faces(
@@ -254,7 +317,7 @@ def generar_vector(ruta_imagen: Path) -> list:
     embedding es la representación numérica del rostro que, en una
     spec futura, permitirá comparar e identificar usuarios.
     """
-    from deepface import DeepFace
+    DeepFace, _, _ = _importar_deepface()
 
     resultados = DeepFace.represent(img_path=str(ruta_imagen), enforce_detection=True)
     return resultados[0]["embedding"]
@@ -269,7 +332,7 @@ def calcular_distancia(vector_a: list, vector_b: list) -> float:
     enroladas (plan.md de spec 003, D1). A menor distancia, más parecidos
     son los dos rostros.
     """
-    from deepface.modules import verification
+    _, verification, _ = _importar_deepface()
 
     return float(verification.find_distance(vector_a, vector_b, _METRICA_DISTANCIA))
 
@@ -284,6 +347,6 @@ def es_coincidencia(distancia: float) -> bool:
     "<=" para replicar exactamente el criterio que usa DeepFace.verify()
     al decidir si dos rostros son la misma persona.
     """
-    from deepface.modules import verification
+    _, verification, _ = _importar_deepface()
 
     return distancia <= verification.find_threshold(_MODELO, _METRICA_DISTANCIA)

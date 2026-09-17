@@ -21,6 +21,8 @@ MODULOS_ENROLAMIENTO = [
     "almacen_rostros.py",
     "enrolamiento.py",
     "identificacion.py",
+    "cobro.py",
+    "eliminacion_cuenta.py",
     "master.py",
 ]
 
@@ -136,6 +138,107 @@ def test_ningun_vector_se_expone_durante_la_identificacion(monkeypatch, capsys):
         for componente in vector:
             assert str(componente) not in salida
     assert "BYTES-DE-FOTO-SECRETA" not in salida
+
+
+def test_spec004_el_cobro_no_expone_identificador_saldo_ni_vector(conexion_fake, monkeypatch, capsys):
+    """Spec 004 (NFR de confidencialidad de identidad, RF-21/RF-27): durante
+    todo el cobro, con la identificación real de spec 003 (solo cámara y
+    DeepFace sustituidos), no aparece en consola ni en ninguna ventana el
+    identificador del pasajero, su saldo ni ningún vector.
+    """
+    from datetime import datetime
+
+    import cobro
+    import cuentas
+    import sesion
+
+    pasajero = "pasajera.secreta@correo.com"
+    vector_enrolado = [0.111111, 0.222222, 0.333333]
+    vector_capturado = [0.444444, 0.555555, 0.666666]
+
+    cuentas.crear_cuenta(conexion_fake, "chofer@correo.com", "Abcdef1!", tipo="chofer")
+    cuentas.crear_cuenta(conexion_fake, pasajero, "Abcdef1!", tipo="pasajero")
+    cuentas.recargar_saldo(conexion_fake, pasajero, 4321)
+    sesion.iniciar_sesion(conexion_fake, "chofer@correo.com", "Abcdef1!")
+
+    ruta_foto = almacen_rostros.RUTA_BASE.parent / "foto_origen.jpg"
+    ruta_foto.parent.mkdir(parents=True, exist_ok=True)
+    ruta_foto.write_bytes(b"foto de prueba")
+    almacen_rostros.guardar_enrolamiento(pasajero, ruta_foto, vector_enrolado)
+
+    monkeypatch.setattr(cobro, "_ahora", lambda: datetime(2026, 9, 16, 9, 0))
+    monkeypatch.setattr(lector_de_caras, "validar_rostro", lambda ruta: None)
+    monkeypatch.setattr(lector_de_caras, "generar_vector", lambda ruta: vector_capturado)
+    monkeypatch.setattr(lector_de_caras, "calcular_distancia", lambda a, b: 0.10)
+    monkeypatch.setattr(lector_de_caras, "es_coincidencia", lambda distancia: True)
+
+    textos_en_ventanas = []
+    monkeypatch.setattr(
+        lector_de_caras,
+        "mostrar_resultado",
+        lambda ruta, mensaje, *, identificado: textos_en_ventanas.append(mensaje),
+    )
+
+    def _identificar_real_sin_camara(**kwargs):
+        # La identificación de spec 003 corre completa; solo la cámara es un
+        # doble. Se inyecta aquí porque los valores por defecto de los
+        # parámetros se fijan al importar el módulo y monkeypatch no los alcanza.
+        return identificacion.identificar(
+            capturar_foto=lambda ruta: ruta.write_bytes(b"BYTES-DE-FOTO-SECRETA"),
+            **kwargs,
+        )
+
+    cobro.fijar_modalidad(conexion_fake, "metro")
+    cobro.cobrar(
+        conexion_fake,
+        identificar=_identificar_real_sin_camara,
+        notificar=lambda mensaje, *, exito: textos_en_ventanas.append(mensaje),
+    )
+
+    assert cuentas.obtener_saldo(conexion_fake, pasajero) == 4316  # sí se cobró
+    assert len(textos_en_ventanas) == 2  # ventana de identificación + ventana de cobro
+
+    salida = "\n".join(textos_en_ventanas) + capsys.readouterr().out
+    assert pasajero not in salida
+    assert "@" not in salida
+    assert "4321" not in salida and "4316" not in salida
+    for vector in (vector_enrolado, vector_capturado):
+        for componente in vector:
+            assert str(componente) not in salida
+    assert "BYTES-DE-FOTO-SECRETA" not in salida
+
+
+def test_spec004_eliminar_cuenta_no_deja_residuos_ni_expone_la_contrasena(conexion_fake, capsys):
+    """Spec 004, RF-34 y NFR de borrado completo (constitution.md, principio 7):
+    tras eliminar una cuenta enrolada no queda nada suyo en enrolled_faces, y
+    la contraseña de confirmación no aparece en ninguna salida.
+    """
+    import cuentas
+    import eliminacion_cuenta
+    import sesion
+
+    contrasena_secreta = "Sup3r$ecreta!"
+    identificador = "pasajera.secreta@correo.com"
+    cuentas.crear_cuenta(conexion_fake, identificador, contrasena_secreta, tipo="pasajero")
+    sesion.iniciar_sesion(conexion_fake, identificador, contrasena_secreta)
+
+    ruta_foto = almacen_rostros.RUTA_BASE.parent / "foto_origen.jpg"
+    ruta_foto.parent.mkdir(parents=True, exist_ok=True)
+    ruta_foto.write_bytes(b"foto de prueba")
+    almacen_rostros.guardar_enrolamiento(identificador, ruta_foto, [0.123456, 0.654321])
+    assert (almacen_rostros.RUTA_BASE / identificador).exists()
+
+    mensajes = []
+    eliminacion_cuenta.eliminar_cuenta(
+        conexion_fake, pedir_contrasena=lambda: contrasena_secreta, notificar=mensajes.append
+    )
+
+    # Ningún archivo ni carpeta (incluidas las temporales ".<id>.tmp") de la cuenta.
+    assert [ruta for ruta in almacen_rostros.RUTA_BASE.glob("**/*") if identificador in str(ruta)] == []
+    assert not cuentas.identificador_en_uso(conexion_fake, identificador)
+
+    salida = "\n".join(mensajes) + capsys.readouterr().out
+    assert contrasena_secreta not in salida
 
 
 def test_modulos_de_enrolamiento_no_importan_librerias_de_red():

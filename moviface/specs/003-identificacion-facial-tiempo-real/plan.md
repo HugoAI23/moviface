@@ -124,6 +124,19 @@ Consecuencias en el diseño:
 - La ventana solo muestra la foto y el mismo mensaje de la terminal: nunca un vector (RF-7). La prueba de seguridad de spec 003 ahora también revisa el texto de la ventana.
 - Solo aplica al flujo de identificación. Las capturas rechazadas (RF-2/RF-3) no abren ventana de resultado: siguen informándose en la terminal y reabriendo la vista previa.
 
+### 8. `tf-keras` faltante cerraba `master.py` al importar DeepFace (encontrado en la demo de la spec 004)
+Al elegir "Enrolar rostro", `master.py` se cerró con `ValueError: You have tensorflow 2.21.0 and this requires tf-keras package`. Es el mismo bloqueo de entorno del punto 1–4, que había reaparecido: `tf-keras` figuraba en `requirements.txt` pero no estaba instalado en `.venv` (el entorno no se había recreado, así que no se pudo determinar cómo se perdió).
+
+Dos causas, dos correcciones (aprobadas por Hugo):
+- **Entorno.** Se instaló `tf-keras==2.21.0` y se fijaron `tensorflow==2.21.0` y `tf-keras==2.21.0` en `requirements.txt`: sin versión fija, una reinstalación podía traer un `tf-keras` que no empatara con TensorFlow, o no traerlo.
+- **Código.** La importación de DeepFace estaba **fuera** del `try` que convierte errores técnicos en `ErrorDeDeteccion` (punto 3), así que la falla de importación no la atrapaba nadie y cerraba el programa, igual que el fallo de cámara del punto 5 (principio 8). Se creó `lector_de_caras._importar_deepface()`, que usan las cuatro funciones que cargan DeepFace (`validar_rostro`, `generar_vector`, `calcular_distancia`, `es_coincidencia`): cualquier excepción al importar —incluido este `ValueError`, que no es un `ImportError`— se convierte en `ErrorDeDeteccion` con un mensaje que menciona `tf-keras`. `master.py` ya la atrapaba en Enrolar, Identificar y Cobrar: ahora informa y vuelve al menú, sin reintentar.
+
+Pruebas agregadas en `test_lector_de_caras.py`: la falla de importación (módulo faltante y el `ValueError` real) se convierte en `ErrorDeDeteccion` en las cuatro funciones, y las tres opciones de menú informan el error sin cerrar `master.py`.
+
+**Segunda diferencia del mismo origen: `opencv-python` 5.x.** Ya con `tf-keras`, el enrolamiento siguió fallando con `Expected path .../cv2/data/haarcascade_frontalface_default.xml violated`: el `.venv` tenía `opencv-python` 5.0.0.93 instalado desde su creación, aunque `requirements.txt` ya exigía `<5` por el punto 2. Esta vez la protección del punto 3 funcionó: se informó como `ErrorDeDeteccion`, sin cerrar el programa, sin reintentar y sin dejar archivos en `enrolled_faces`. Se sincronizó el entorno con `pip install -r requirements.txt` (instaló `opencv-python` 4.14.0.94; una simulación previa confirmó que era la única diferencia pendiente) y se comprobó con DeepFace real que una imagen sin rostro se rechaza como `CapturaInvalida`, no como error de entorno.
+
+**Lección:** los puntos 1–4 y este se resolvieron en `requirements.txt`, pero el `.venv` nunca se volvió a sincronizar con él. Ante cualquier error de entorno, lo primero es correr `pip install -r requirements.txt --dry-run` para ver qué diferencias hay.
+
 ## Pruebas
 Mismo patrón que `test_enrolamiento.py`: `capturar_foto` se inyecta como parámetro y `lector_de_caras.validar_rostro`/`generar_vector`/`calcular_distancia` se sustituyen con `monkeypatch`, para no depender de cámara ni de DeepFace real. `almacen_rostros.listar_cuentas_enroladas()` se prueba contra una carpeta `enrolled_faces` temporal (fixture `autouse` ya existente en `test_enrolamiento.py`/`test_seguridad_biometrica.py`).
 
@@ -153,4 +166,4 @@ Mismo patrón que `test_enrolamiento.py`: `capturar_foto` se inyecta como parám
 - Detección de suplantación ("liveness detection").
 
 ## Estado del plan
-D1 a D4 quedaron resueltas, junto con la lógica de reintentos de RF-5 vs RF-2/RF-3. Implementación completa (T1–T5 de `tasks.md`) y suite automatizada en verde. La demo con cámara real expuso 7 hallazgos adicionales (ver "Hallazgos de la demo" arriba), todos ya resueltos en código y cubiertos por pruebas nuevas. Queda pendiente únicamente repetir la demo manual completa (T6.1–T6.4) para cerrar la spec.
+D1 a D4 quedaron resueltas, junto con la lógica de reintentos de RF-5 vs RF-2/RF-3. Implementación completa (T1–T5 de `tasks.md`) y suite automatizada en verde. La demo con cámara real expuso 7 hallazgos adicionales, y la demo de la spec 004 un octavo (`tf-keras` faltante); todos ya resueltos en código y cubiertos por pruebas nuevas (ver "Hallazgos de la demo" arriba). Queda pendiente únicamente repetir la demo manual completa (T6.1–T6.4) para cerrar la spec.

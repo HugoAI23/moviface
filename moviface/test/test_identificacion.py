@@ -292,6 +292,33 @@ def test_rf7_el_resultado_identificado_se_muestra_en_ventana(
     assert mostrado["foto_existe"]
 
 
+def test_spec004_rf21_sin_revelar_identificador_devuelve_la_cuenta_pero_no_la_muestra(
+    monkeypatch, enrolar_cuenta, resultados_mostrados
+):
+    """Excepción acotada de specs/004 (RF-21). El caso por defecto sigue
+    cubierto sin cambios por test_rf7_el_resultado_identificado_se_muestra_en_ventana.
+    """
+    enrolar_cuenta("cuenta_ana", [1.0, 1.0])
+    monkeypatch.setattr(lector_de_caras, "validar_rostro", lambda ruta: None)
+    monkeypatch.setattr(lector_de_caras, "generar_vector", lambda ruta: [1.0, 1.0])
+    monkeypatch.setattr(
+        lector_de_caras, "calcular_distancia", _distancias_por_vector({(1.0, 1.0): 0.10})
+    )
+
+    mensajes = []
+    identificado = identificacion.identificar(
+        capturar_foto=_capturar_foto_falsa,
+        notificar=mensajes.append,
+        revelar_identificador=False,
+    )
+
+    # Quien llama (cobro.py) sí recibe la cuenta para poder cobrarle...
+    assert identificado == "cuenta_ana"
+    # ...pero no aparece ni en la terminal ni en la ventana.
+    assert mensajes == ["Rostro identificado."]
+    assert [mostrado["mensaje"] for mostrado in resultados_mostrados] == ["Rostro identificado."]
+
+
 def test_rf5_el_resultado_no_identificado_se_muestra_en_ventana(
     monkeypatch, resultados_mostrados
 ):

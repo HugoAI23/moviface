@@ -19,7 +19,7 @@ _CONTRASENA = "Abcdef1!"
 
 @pytest.fixture
 def cuenta_creada(conexion_fake):
-    cuentas.crear_cuenta(conexion_fake, _IDENTIFICADOR, _CONTRASENA)
+    cuentas.crear_cuenta(conexion_fake, _IDENTIFICADOR, _CONTRASENA, tipo="pasajero")
     return conexion_fake
 
 

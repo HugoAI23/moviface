@@ -25,6 +25,34 @@ CREATE TABLE IF NOT EXISTS cuentas (
 );
 """
 
+# Spec 004 (plan.md, D1): el tipo de una cuenta no es una columna, sino
+# en cuál de estas dos tablas tiene fila. Ambas usan `identificador`
+# como clave, igual que el resto del proyecto.
+ESQUEMA_PASAJEROS = """
+CREATE TABLE IF NOT EXISTS pasajeros (
+    identificador TEXT PRIMARY KEY REFERENCES cuentas(identificador) ON DELETE CASCADE,
+    saldo INTEGER NOT NULL DEFAULT 0 CHECK (saldo >= 0)
+);
+"""
+
+ESQUEMA_CHOFERES = """
+CREATE TABLE IF NOT EXISTS choferes (
+    identificador TEXT PRIMARY KEY REFERENCES cuentas(identificador) ON DELETE CASCADE
+);
+"""
+
+# Solo se cobra a pasajeros (RF-25), por eso referencia `pasajeros` y no
+# `cuentas`. Los CHECK son una segunda barrera además de cuentas.py/cobro.py.
+ESQUEMA_TRANSACCIONES = """
+CREATE TABLE IF NOT EXISTS transacciones (
+    id SERIAL PRIMARY KEY,
+    identificador TEXT NOT NULL REFERENCES pasajeros(identificador),
+    modalidad TEXT NOT NULL CHECK (modalidad IN ('metro', 'metrobus', 'bici')),
+    monto INTEGER NOT NULL CHECK (monto > 0),
+    fecha TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+"""
+
 
 class ErrorConexionBaseDatos(Exception):
     """No se pudo establecer conexión con PostgreSQL.
@@ -58,7 +86,13 @@ def obtener_conexion():
 
 
 def inicializar_esquema(conexion) -> None:
-    """Crea la tabla `cuentas` si todavía no existe (specs/002-login, D3)."""
+    """Crea las tablas si todavía no existen (specs/002-login D3, specs/004 D1).
+
+    El orden importa: cada tabla se crea después de las que referencia.
+    """
     with conexion.cursor() as cursor:
         cursor.execute(ESQUEMA_CUENTAS)
+        cursor.execute(ESQUEMA_PASAJEROS)
+        cursor.execute(ESQUEMA_CHOFERES)
+        cursor.execute(ESQUEMA_TRANSACCIONES)
     conexion.commit()

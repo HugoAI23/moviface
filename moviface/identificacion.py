@@ -23,8 +23,13 @@ def identificar(
     *,
     capturar_foto=lector_de_caras.capturar_foto,
     notificar=print,
+    revelar_identificador: bool = True,
 ) -> str | None:
     """Ejecuta el flujo completo de identificación (RF-1 a RF-9).
+
+    `revelar_identificador=False` es la excepción acotada de specs/004
+    (RF-21): el cobro identifica al pasajero sin mostrar a qué cuenta
+    pertenece. Por defecto se mantiene RF-7 de esta spec sin cambios.
 
     Devuelve el id de la cuenta identificada, o None si ninguna cuenta
     enrolada coincidió con el rostro capturado.
@@ -67,9 +72,12 @@ def identificar(
             # RF-5: nadie alcanzó el umbral (incluye el caso de que no haya
             # ninguna cuenta enrolada todavía).
             mensaje = "No se identificó a ninguna cuenta enrolada."
-        else:
+        elif revelar_identificador:
             # RF-7: se informa el identificador de la cuenta, nunca su vector.
             mensaje = f"Rostro identificado: cuenta {id_identificado}."
+        else:
+            # Spec 004, RF-21: ni siquiera el identificador sale en pantalla.
+            mensaje = "Rostro identificado."
 
         notificar(mensaje)
         lector_de_caras.mostrar_resultado(

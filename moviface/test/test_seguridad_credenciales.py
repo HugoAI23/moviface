@@ -49,14 +49,14 @@ def test_modulos_de_login_no_importan_librerias_de_red_prohibidas():
 
 
 def test_contrasena_nunca_aparece_en_salida_de_consola(conexion_fake, capsys):
-    cuentas.crear_cuenta(conexion_fake, "usuario@correo.com", _CONTRASENA_SECRETA)
+    cuentas.crear_cuenta(conexion_fake, "usuario@correo.com", _CONTRASENA_SECRETA, tipo="pasajero")
 
     salida = capsys.readouterr().out
     assert _CONTRASENA_SECRETA not in salida
 
 
 def test_hash_de_contrasena_nunca_es_igual_ni_contiene_la_contrasena_en_claro(conexion_fake):
-    cuentas.crear_cuenta(conexion_fake, "usuario@correo.com", _CONTRASENA_SECRETA)
+    cuentas.crear_cuenta(conexion_fake, "usuario@correo.com", _CONTRASENA_SECRETA, tipo="pasajero")
 
     cuenta = cuentas.buscar_cuenta(conexion_fake, "usuario@correo.com")
     assert cuenta["contrasena_hash"] != _CONTRASENA_SECRETA
